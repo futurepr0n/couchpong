@@ -2,7 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Controller</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pong Controller</title>
   <style>
     body {
       margin: 0;
@@ -12,29 +13,845 @@
       align-items: center;
       height: 100vh;
       background-color: #f0f0f0;
+      font-family: Arial, sans-serif;
+      touch-action: none; /* Prevent browser handling of touch gestures */
     }
-    #throwButton {
+    .button {
       width: 80%;
-      height: 20%;
-      font-size: 24px;
-      background-color: #4CAF50;
-      color: white;
+      height: 60px;
+      font-size: 18px;
+      margin: 10px 0;
       border: none;
       border-radius: 5px;
       cursor: pointer;
     }
+    #permissionButton {
+      background-color: #2196F3;
+      color: white;
+      font-weight: bold;
+    }
+    #throwButton {
+      height: 120px;
+      background-color: #4CAF50;
+      color: white;
+      font-size: 24px;
+    }
     #statusDisplay {
       font-size: 18px;
       color: #333;
-      margin: 10px;
+      margin: 20px;
       text-align: center;
+      padding: 10px;
+      max-width: 80%;
+    }
+    #connectionStatus {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+      width: 80%;
+    }
+    .connected {
+      background-color: rgba(76, 175, 80, 0.3);
+    }
+    .disconnected {
+      background-color: rgba(244, 67, 54, 0.3);
+    }
+    .permission-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .ios-note {
+      font-style: italic;
+      color: #666;
+      font-size: 14px;
+      margin-top: 5px;
+      text-align: center;
+      max-width: 80%;
+    }
+    #debugInfo {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      font-size: 12px;
+      color: #666;
+      max-width: 80%;
+      background-color: rgba(255, 255, 255, 0.7);
+      padding: 5px;
+      border-radius: 5px;
     }
   </style>
 </head>
 <body>
-  <button id="throwButton">Hold to Throw</button>
-  <div id="statusDisplay">Connected to server. Hold to throw.</div>
+  <div id="roomInfo">
+    <h2>Pong Game Controller</h2>
+  </div>
+  
+  <div id="statusDisplay">Loading...</div>
+  
+  <div class="permission-section" id="permissionSection">
+    <h3>iOS Permission Required</h3>
+    <button id="permissionButton" class="button">TAP HERE TO ENABLE MOTION CONTROLS</button>
+    <p class="ios-note">iOS requires permission to use motion controls for the game</p>
+  </div>
+  
+  <button id="throwButton" class="button">HOLD TO THROW</button>
+  
+  <div id="connectionStatus">Connecting to server...</div>
+  
+  <div id="debugInfo"></div>
+  
   <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
-  <script src="controller.js"></script>
+  <script>
+    // Get room ID from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    let roomId = urlParams.get('room');
+    
+    // DOM Elements
+    const throwButton = document.getElementById('throwButton');
+    const permissionButton = document.getElementById('permissionButton');
+    const permissionSection = document.getElementById('permissionSection');
+    const statusDisplay = document.getElementById('statusDisplay');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const debugInfo = document.getElementById('debugInfo');
+    
+    // Initially hide the throw button
+    throwButton.style.display = 'none';
+    
+    // Set up Socket.io connection
+    const socket = io();
+    
+    // Motion sensors flag
+    let motionPermissionGranted = false;
+    
+    // Motion tracking variables
+    let initialOrientation = { beta: 0, gamma: 0 };
+    let currentOrientation = { beta: 0, gamma: 0 };
+    let isThrowing = false;
+    let throwStartTime = 0;
+    let orientationHistory = [];
+    let lastOrientationTime = 0;
+    
+    // Debug function
+    function debug(message) {
+      console.log(message);
+      debugInfo.textContent = message;
+    }
+    
+    // Check if device supports motion events
+    function checkDeviceMotionSupport() {
+      if (window.DeviceOrientationEvent) {
+        debug("DeviceOrientationEvent is supported");
+        return true;
+      } else {
+        debug("DeviceOrientationEvent is NOT supported");
+        statusDisplay.textContent = "Your device doesn't support motion sensors. Please use a different device.";
+        return false;
+      }
+    }
+    
+    // Request iOS motion permission
+    function requestMotionPermission() {
+      debug("Permission button clicked");
+      statusDisplay.textContent = "Requesting permission...";
+      
+      // iOS 13+ request for DeviceOrientationEvent
+      if (typeof DeviceOrientationEvent !== 'undefined' && 
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        
+        debug("Using DeviceOrientationEvent.requestPermission");
+        DeviceOrientationEvent.requestPermission()
+          .then(permissionState => {
+            debug("Permission response: " + permissionState);
+            if (permissionState === 'granted') {
+              motionPermissionGranted = true;
+              showThrowButton();
+            } else {
+              statusDisplay.textContent = 'Motion permission denied. Please allow motion sensors and refresh.';
+            }
+          })
+          .catch(error => {
+            debug("Permission error: " + error);
+            // Fall back to DeviceMotionEvent
+            requestDeviceMotionPermission();
+          });
+      } 
+      // iOS 13+ request for DeviceMotionEvent
+      else {
+        requestDeviceMotionPermission();
+      }
+    }
+    
+    function requestDeviceMotionPermission() {
+      if (typeof DeviceMotionEvent !== 'undefined' && 
+          typeof DeviceMotionEvent.requestPermission === 'function') {
+        
+        debug("Using DeviceMotionEvent.requestPermission");
+        DeviceMotionEvent.requestPermission()
+          .then(permissionState => {
+            debug("Motion permission response: " + permissionState);
+            if (permissionState === 'granted') {
+              motionPermissionGranted = true;
+              showThrowButton();
+            } else {
+              statusDisplay.textContent = 'Motion permission denied. Please allow motion sensors and refresh.';
+            }
+          })
+          .catch(error => {
+            debug("Motion permission error: " + error);
+            // Assume non-iOS device or older iOS, try direct approach
+            assumeMotionPermission();
+          });
+      } else {
+        // Not iOS 13+ or not supporting explicit permission
+        assumeMotionPermission();
+      }
+    }
+    
+    function assumeMotionPermission() {
+      debug("Assuming motion permission (non-iOS or older iOS)");
+      // Some devices don't need permission, show throw button and we'll see if events come in
+      motionPermissionGranted = true;
+      showThrowButton();
+      
+      // Setup a timeout to check if we're getting orientation events
+      setTimeout(() => {
+        if (currentOrientation.beta === 0 && currentOrientation.gamma === 0) {
+          debug("Not receiving orientation events after timeout");
+          statusDisplay.textContent = "Motion sensors not available. Please check your device settings.";
+        }
+      }, 2000);
+    }
+    
+    function showThrowButton() {
+      debug("Showing throw button");
+      permissionSection.style.display = 'none';
+      throwButton.style.display = 'block';
+      statusDisplay.textContent = 'Motion access granted! Hold to throw.';
+      
+      // Force iOS to start sending events (sometimes needed)
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      window.addEventListener('devicemotion', function() {}, true);
+    }
+    
+    // Handle orientation event
+    function handleOrientation(event) {
+      const timestamp = Date.now();
+      
+      // Check if we're getting real values
+      if (event.beta !== null && event.gamma !== null) {
+        currentOrientation.beta = event.beta;   // Forward/back tilt (degrees)
+        currentOrientation.gamma = event.gamma; // Left/right tilt (degrees)
+        
+        // If throwing, record orientation with timestamp
+        if (isThrowing) {
+          if (timestamp - lastOrientationTime > 50) {
+            orientationHistory.push({
+              beta: currentOrientation.beta,
+              gamma: currentOrientation.gamma,
+              timestamp: timestamp
+            });
+            lastOrientationTime = timestamp;
+          }
+        }
+      }
+    }
+    
+    // Start tracking orientation when permissions are granted
+    window.addEventListener('deviceorientation', handleOrientation, true);
+    
+    // Start throw
+    throwButton.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      isThrowing = true;
+      throwStartTime = Date.now();
+      initialOrientation.beta = currentOrientation.beta;
+      initialOrientation.gamma = currentOrientation.gamma;
+      
+      // Reset history for this throw
+      orientationHistory = [{
+        beta: initialOrientation.beta,
+        gamma: initialOrientation.gamma,
+        timestamp: throwStartTime
+      }];
+      lastOrientationTime = throwStartTime;
+      
+      statusDisplay.textContent = 'Hold and swing your phone to throw...';
+      debug("Throw started: initial beta=" + initialOrientation.beta + ", gamma=" + initialOrientation.gamma);
+    });
+    
+    // End throw and calculate velocity
+    throwButton.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (isThrowing) {
+        isThrowing = false;
+        const throwEndTime = Date.now();
+        const throwDuration = (throwEndTime - throwStartTime) / 1000; // in seconds
+        
+        debug("Throw ended: final beta=" + currentOrientation.beta + ", gamma=" + currentOrientation.gamma);
+        
+        // Add the final position to history
+        orientationHistory.push({
+          beta: currentOrientation.beta,
+          gamma: currentOrientation.gamma,
+          timestamp: throwEndTime
+        });
+        
+        // Calculate motion
+        let maxAngularSpeed = 0;
+        
+        if (orientationHistory.length > 1) {
+          for (let i = 1; i < orientationHistory.length; i++) {
+            const prev = orientationHistory[i-1];
+            const curr = orientationHistory[i];
+            const dt = (curr.timestamp - prev.timestamp) / 1000; // time diff in seconds
+            
+            if (dt > 0) {
+              const betaChange = Math.abs(curr.beta - prev.beta);
+              const gammaChange = Math.abs(curr.gamma - prev.gamma);
+              // Angular speed in degrees per second
+              const angularSpeed = Math.sqrt(betaChange*betaChange + gammaChange*gammaChange) / dt;
+              maxAngularSpeed = Math.max(maxAngularSpeed, angularSpeed);
+            }
+          }
+        }
+        
+        // Calculate orientation change in radians (first to last point)
+        const deltaBeta = (currentOrientation.beta - initialOrientation.beta) * (Math.PI / 180);
+        const deltaGamma = (currentOrientation.gamma - initialOrientation.gamma) * (Math.PI / 180);
+        
+        // Base throw power depends on both angular velocity and throw duration
+        const speedFactor = Math.min(maxAngularSpeed / 100, 2); // Cap at 2x
+        const durationFactor = Math.min(throwDuration / 1.5, 1); // Duration factor maxes at 1.5 seconds
+        
+        // Combined power factor
+        const powerFactor = 0.5 + (speedFactor * 0.8) + (durationFactor * 0.2);
+        
+        // Base speed with dynamic adjustment
+        const baseSpeed = 15; 
+        const speed = baseSpeed * powerFactor;
+        
+        // Direction calculation
+        const direction = {
+          x: -Math.sin(deltaGamma),
+          y: Math.sin(deltaBeta),
+          z: Math.cos(deltaGamma) * Math.cos(deltaBeta)
+        };
+        
+        // Normalize direction vector
+        const dirMagnitude = Math.sqrt(
+          direction.x * direction.x + 
+          direction.y * direction.y + 
+          direction.z * direction.z
+        );
+        
+        if (dirMagnitude > 0) {
+          direction.x /= dirMagnitude;
+          direction.y /= dirMagnitude;
+          direction.z /= dirMagnitude;
+        }
+        
+        const velocity = {
+          x: direction.x * speed,
+          y: direction.y * speed,
+          z: direction.z * speed
+        };
+        
+        // Check for minimal motion
+        const totalMotion = Math.abs(deltaBeta) + Math.abs(deltaGamma);
+        const minimalMotionThreshold = 0.15;
+        
+        if (totalMotion < minimalMotionThreshold || maxAngularSpeed < 20) {
+          // Default throw
+          velocity.x = 0 + (Math.random() * 2 - 1);
+          velocity.y = 4;
+          velocity.z = 8;
+          statusDisplay.textContent = 'Minimal motion detected. Using default throw.';
+        } else {
+          statusDisplay.textContent = `Throw power: ${Math.round(powerFactor * 100)}%. Speed: ${Math.round(speed)}`;
+        }
+        
+        debug(`Throw stats: motion=${totalMotion.toFixed(2)}, speed=${maxAngularSpeed.toFixed(2)}, power=${powerFactor.toFixed(2)}`);
+        
+        // Send throw data to server
+        socket.emit('throw', velocity);
+      }
+    });
+    
+    // Socket connection event handlers
+    socket.on('connect', () => {
+      connectionStatus.textContent = 'Connected to server';
+      connectionStatus.className = 'connected';
+      
+      // Check for room ID and join
+      if (roomId) {
+        socket.emit('joinRoom', roomId);
+      } else {
+        statusDisplay.textContent = 'No room ID provided. Please scan the QR code from the game screen.';
+      }
+    });
+    
+    socket.on('disconnect', () => {
+      connectionStatus.textContent = 'Disconnected from server';
+      connectionStatus.className = 'disconnected';
+      statusDisplay.textContent = 'Connection lost. Please refresh the page.';
+    });
+    
+    socket.on('roomJoined', (data) => {
+      roomId = data.roomId;
+      connectionStatus.textContent = `Connected to room: ${roomId}`;
+      
+      // Check for device support
+      if (checkDeviceMotionSupport()) {
+        if (!motionPermissionGranted) {
+          statusDisplay.textContent = 'Please enable motion controls to play';
+          permissionSection.style.display = 'flex';
+        }
+      }
+    });
+    
+    socket.on('roomError', (data) => {
+      connectionStatus.textContent = `Error: ${data.message}`;
+      connectionStatus.className = 'disconnected';
+      statusDisplay.textContent = 'Invalid room ID. Please scan the QR code again.';
+    });
+    
+    // Add permission button click handler
+    permissionButton.addEventListener('click', requestMotionPermission);
+    
+    // Initialize
+    debug("Controller initializing...");
+  </script>
+</body>
+</html><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pong Controller</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+      font-family: Arial, sans-serif;
+      touch-action: none; /* Prevent browser handling of touch gestures */
+    }
+    .button {
+      width: 80%;
+      height: 60px;
+      font-size: 18px;
+      margin: 10px 0;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #permissionButton {
+      background-color: #2196F3;
+      color: white;
+      font-weight: bold;
+    }
+    #throwButton {
+      height: 120px;
+      background-color: #4CAF50;
+      color: white;
+      font-size: 24px;
+    }
+    #statusDisplay {
+      font-size: 18px;
+      color: #333;
+      margin: 20px;
+      text-align: center;
+      padding: 10px;
+      max-width: 80%;
+    }
+    #connectionStatus {
+      margin-top: 20px;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+      width: 80%;
+    }
+    .connected {
+      background-color: rgba(76, 175, 80, 0.3);
+    }
+    .disconnected {
+      background-color: rgba(244, 67, 54, 0.3);
+    }
+    .permission-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .ios-note {
+      font-style: italic;
+      color: #666;
+      font-size: 14px;
+      margin-top: 5px;
+      text-align: center;
+      max-width: 80%;
+    }
+    #debugInfo {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      font-size: 12px;
+      color: #666;
+      max-width: 80%;
+      background-color: rgba(255, 255, 255, 0.7);
+      padding: 5px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="roomInfo">
+    <h2>Pong Game Controller</h2>
+  </div>
+  
+  <div id="statusDisplay">Loading...</div>
+  
+  <div class="permission-section" id="permissionSection">
+    <h3>iOS Permission Required</h3>
+    <button id="permissionButton" class="button">TAP HERE TO ENABLE MOTION CONTROLS</button>
+    <p class="ios-note">iOS requires permission to use motion controls for the game</p>
+  </div>
+  
+  <button id="throwButton" class="button">HOLD TO THROW</button>
+  
+  <div id="connectionStatus">Connecting to server...</div>
+  
+  <div id="debugInfo"></div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
+  <script>
+    // Get room ID from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    let roomId = urlParams.get('room');
+    
+    // DOM Elements
+    const throwButton = document.getElementById('throwButton');
+    const permissionButton = document.getElementById('permissionButton');
+    const permissionSection = document.getElementById('permissionSection');
+    const statusDisplay = document.getElementById('statusDisplay');
+    const connectionStatus = document.getElementById('connectionStatus');
+    const debugInfo = document.getElementById('debugInfo');
+    
+    // Initially hide the throw button
+    throwButton.style.display = 'none';
+    
+    // Set up Socket.io connection
+    const socket = io();
+    
+    // Motion sensors flag
+    let motionPermissionGranted = false;
+    
+    // Motion tracking variables
+    let initialOrientation = { beta: 0, gamma: 0 };
+    let currentOrientation = { beta: 0, gamma: 0 };
+    let isThrowing = false;
+    let throwStartTime = 0;
+    let orientationHistory = [];
+    let lastOrientationTime = 0;
+    
+    // Debug function
+    function debug(message) {
+      console.log(message);
+      debugInfo.textContent = message;
+    }
+    
+    // Check if device supports motion events
+    function checkDeviceMotionSupport() {
+      if (window.DeviceOrientationEvent) {
+        debug("DeviceOrientationEvent is supported");
+        return true;
+      } else {
+        debug("DeviceOrientationEvent is NOT supported");
+        statusDisplay.textContent = "Your device doesn't support motion sensors. Please use a different device.";
+        return false;
+      }
+    }
+    
+    // Request iOS motion permission
+    function requestMotionPermission() {
+      debug("Permission button clicked");
+      statusDisplay.textContent = "Requesting permission...";
+      
+      // iOS 13+ request for DeviceOrientationEvent
+      if (typeof DeviceOrientationEvent !== 'undefined' && 
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        
+        debug("Using DeviceOrientationEvent.requestPermission");
+        DeviceOrientationEvent.requestPermission()
+          .then(permissionState => {
+            debug("Permission response: " + permissionState);
+            if (permissionState === 'granted') {
+              motionPermissionGranted = true;
+              showThrowButton();
+            } else {
+              statusDisplay.textContent = 'Motion permission denied. Please allow motion sensors and refresh.';
+            }
+          })
+          .catch(error => {
+            debug("Permission error: " + error);
+            // Fall back to DeviceMotionEvent
+            requestDeviceMotionPermission();
+          });
+      } 
+      // iOS 13+ request for DeviceMotionEvent
+      else {
+        requestDeviceMotionPermission();
+      }
+    }
+    
+    function requestDeviceMotionPermission() {
+      if (typeof DeviceMotionEvent !== 'undefined' && 
+          typeof DeviceMotionEvent.requestPermission === 'function') {
+        
+        debug("Using DeviceMotionEvent.requestPermission");
+        DeviceMotionEvent.requestPermission()
+          .then(permissionState => {
+            debug("Motion permission response: " + permissionState);
+            if (permissionState === 'granted') {
+              motionPermissionGranted = true;
+              showThrowButton();
+            } else {
+              statusDisplay.textContent = 'Motion permission denied. Please allow motion sensors and refresh.';
+            }
+          })
+          .catch(error => {
+            debug("Motion permission error: " + error);
+            // Assume non-iOS device or older iOS, try direct approach
+            assumeMotionPermission();
+          });
+      } else {
+        // Not iOS 13+ or not supporting explicit permission
+        assumeMotionPermission();
+      }
+    }
+    
+    function assumeMotionPermission() {
+      debug("Assuming motion permission (non-iOS or older iOS)");
+      // Some devices don't need permission, show throw button and we'll see if events come in
+      motionPermissionGranted = true;
+      showThrowButton();
+      
+      // Setup a timeout to check if we're getting orientation events
+      setTimeout(() => {
+        if (currentOrientation.beta === 0 && currentOrientation.gamma === 0) {
+          debug("Not receiving orientation events after timeout");
+          statusDisplay.textContent = "Motion sensors not available. Please check your device settings.";
+        }
+      }, 2000);
+    }
+    
+    function showThrowButton() {
+      debug("Showing throw button");
+      permissionSection.style.display = 'none';
+      throwButton.style.display = 'block';
+      statusDisplay.textContent = 'Motion access granted! Hold to throw.';
+      
+      // Force iOS to start sending events (sometimes needed)
+      window.addEventListener('deviceorientation', handleOrientation, true);
+      window.addEventListener('devicemotion', function() {}, true);
+    }
+    
+    // Handle orientation event
+    function handleOrientation(event) {
+      const timestamp = Date.now();
+      
+      // Check if we're getting real values
+      if (event.beta !== null && event.gamma !== null) {
+        currentOrientation.beta = event.beta;   // Forward/back tilt (degrees)
+        currentOrientation.gamma = event.gamma; // Left/right tilt (degrees)
+        
+        // If throwing, record orientation with timestamp
+        if (isThrowing) {
+          if (timestamp - lastOrientationTime > 50) {
+            orientationHistory.push({
+              beta: currentOrientation.beta,
+              gamma: currentOrientation.gamma,
+              timestamp: timestamp
+            });
+            lastOrientationTime = timestamp;
+          }
+        }
+      }
+    }
+    
+    // Start tracking orientation when permissions are granted
+    window.addEventListener('deviceorientation', handleOrientation, true);
+    
+    // Start throw
+    throwButton.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      isThrowing = true;
+      throwStartTime = Date.now();
+      initialOrientation.beta = currentOrientation.beta;
+      initialOrientation.gamma = currentOrientation.gamma;
+      
+      // Reset history for this throw
+      orientationHistory = [{
+        beta: initialOrientation.beta,
+        gamma: initialOrientation.gamma,
+        timestamp: throwStartTime
+      }];
+      lastOrientationTime = throwStartTime;
+      
+      statusDisplay.textContent = 'Hold and swing your phone to throw...';
+      debug("Throw started: initial beta=" + initialOrientation.beta + ", gamma=" + initialOrientation.gamma);
+    });
+    
+    // End throw and calculate velocity
+    throwButton.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      if (isThrowing) {
+        isThrowing = false;
+        const throwEndTime = Date.now();
+        const throwDuration = (throwEndTime - throwStartTime) / 1000; // in seconds
+        
+        debug("Throw ended: final beta=" + currentOrientation.beta + ", gamma=" + currentOrientation.gamma);
+        
+        // Add the final position to history
+        orientationHistory.push({
+          beta: currentOrientation.beta,
+          gamma: currentOrientation.gamma,
+          timestamp: throwEndTime
+        });
+        
+        // Calculate motion
+        let maxAngularSpeed = 0;
+        
+        if (orientationHistory.length > 1) {
+          for (let i = 1; i < orientationHistory.length; i++) {
+            const prev = orientationHistory[i-1];
+            const curr = orientationHistory[i];
+            const dt = (curr.timestamp - prev.timestamp) / 1000; // time diff in seconds
+            
+            if (dt > 0) {
+              const betaChange = Math.abs(curr.beta - prev.beta);
+              const gammaChange = Math.abs(curr.gamma - prev.gamma);
+              // Angular speed in degrees per second
+              const angularSpeed = Math.sqrt(betaChange*betaChange + gammaChange*gammaChange) / dt;
+              maxAngularSpeed = Math.max(maxAngularSpeed, angularSpeed);
+            }
+          }
+        }
+        
+        // Calculate orientation change in radians (first to last point)
+        const deltaBeta = (currentOrientation.beta - initialOrientation.beta) * (Math.PI / 180);
+        const deltaGamma = (currentOrientation.gamma - initialOrientation.gamma) * (Math.PI / 180);
+        
+        // Base throw power depends on both angular velocity and throw duration
+        const speedFactor = Math.min(maxAngularSpeed / 100, 2); // Cap at 2x
+        const durationFactor = Math.min(throwDuration / 1.5, 1); // Duration factor maxes at 1.5 seconds
+        
+        // Combined power factor
+        const powerFactor = 0.5 + (speedFactor * 0.8) + (durationFactor * 0.2);
+        
+        // Base speed with dynamic adjustment
+        const baseSpeed = 15; 
+        const speed = baseSpeed * powerFactor;
+        
+        // Direction calculation
+        const direction = {
+          x: -Math.sin(deltaGamma),
+          y: Math.sin(deltaBeta),
+          z: Math.cos(deltaGamma) * Math.cos(deltaBeta)
+        };
+        
+        // Normalize direction vector
+        const dirMagnitude = Math.sqrt(
+          direction.x * direction.x + 
+          direction.y * direction.y + 
+          direction.z * direction.z
+        );
+        
+        if (dirMagnitude > 0) {
+          direction.x /= dirMagnitude;
+          direction.y /= dirMagnitude;
+          direction.z /= dirMagnitude;
+        }
+        
+        const velocity = {
+          x: direction.x * speed,
+          y: direction.y * speed,
+          z: direction.z * speed
+        };
+        
+        // Check for minimal motion
+        const totalMotion = Math.abs(deltaBeta) + Math.abs(deltaGamma);
+        const minimalMotionThreshold = 0.15;
+        
+        if (totalMotion < minimalMotionThreshold || maxAngularSpeed < 20) {
+          // Default throw
+          velocity.x = 0 + (Math.random() * 2 - 1);
+          velocity.y = 4;
+          velocity.z = 8;
+          statusDisplay.textContent = 'Minimal motion detected. Using default throw.';
+        } else {
+          statusDisplay.textContent = `Throw power: ${Math.round(powerFactor * 100)}%. Speed: ${Math.round(speed)}`;
+        }
+        
+        debug(`Throw stats: motion=${totalMotion.toFixed(2)}, speed=${maxAngularSpeed.toFixed(2)}, power=${powerFactor.toFixed(2)}`);
+        
+        // Send throw data to server
+        socket.emit('throw', velocity);
+      }
+    });
+    
+    // Socket connection event handlers
+    socket.on('connect', () => {
+      connectionStatus.textContent = 'Connected to server';
+      connectionStatus.className = 'connected';
+      
+      // Check for room ID and join
+      if (roomId) {
+        socket.emit('joinRoom', roomId);
+      } else {
+        statusDisplay.textContent = 'No room ID provided. Please scan the QR code from the game screen.';
+      }
+    });
+    
+    socket.on('disconnect', () => {
+      connectionStatus.textContent = 'Disconnected from server';
+      connectionStatus.className = 'disconnected';
+      statusDisplay.textContent = 'Connection lost. Please refresh the page.';
+    });
+    
+    socket.on('roomJoined', (data) => {
+      roomId = data.roomId;
+      connectionStatus.textContent = `Connected to room: ${roomId}`;
+      
+      // Check for device support
+      if (checkDeviceMotionSupport()) {
+        if (!motionPermissionGranted) {
+          statusDisplay.textContent = 'Please enable motion controls to play';
+          permissionSection.style.display = 'flex';
+        }
+      }
+    });
+    
+    socket.on('roomError', (data) => {
+      connectionStatus.textContent = `Error: ${data.message}`;
+      connectionStatus.className = 'disconnected';
+      statusDisplay.textContent = 'Invalid room ID. Please scan the QR code again.';
+    });
+    
+    // Add permission button click handler
+    permissionButton.addEventListener('click', requestMotionPermission);
+    
+    // Initialize
+    debug("Controller initializing...");
+  </script>
 </body>
 </html>
