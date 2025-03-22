@@ -196,6 +196,7 @@ function checkBallReset() {
 // Function to reset the ball
 function resetBall() {
   ballInFlight = false;
+  cupHitInCurrentTurn = false;  // Reset the cup hit flag
   ballBody.position.set(0, 1, -3); // Reset position
   ballBody.velocity.set(0, 0, 0);  // Stop movement
   ballBody.angularVelocity.set(0, 0, 0); // Stop rotation
@@ -203,26 +204,60 @@ function resetBall() {
 }
 
 // Collision detection
+let cupHitInCurrentTurn = false;
 let lastHitTime = 0;
 ballBody.addEventListener('collide', (event) => {
   const otherBody = event.body;
   
-  // Prevent multiple detections within short time
-  if (Date.now() - lastHitTime < 500) return;
+  // Prevent multiple detections within short time and only allow one cup hit per turn
+  if (Date.now() - lastHitTime < 500 || cupHitInCurrentTurn) return;
   
   const hitCup = cups.find(cup => cup.body === otherBody);
   if (hitCup) {
     lastHitTime = Date.now();
-    scene.remove(hitCup.mesh);
-    world.removeBody(hitCup.body);
-    cups.splice(cups.indexOf(hitCup), 1);
+    cupHitInCurrentTurn = true;  // Mark that we've hit a cup this turn
+    
+    // Stop the ball immediately to prevent further collisions
+    ballBody.velocity.set(0, 0, 0);
+    ballBody.angularVelocity.set(0, 0, 0);
+    
+    // Visual feedback
     throwFeedback.textContent = 'Cup hit! 🎉';
     console.log('Cup hit!');
     
-    // Reset the ball after a cup hit
+    // Create a hit effect (expanding circle)
+    const hitEffect = new THREE.Mesh(
+      new THREE.RingGeometry(0.1, 0.12, 32),
+      new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 })
+    );
+    hitEffect.position.set(hitCup.position[0], 0.01, hitCup.position[2]);
+    hitEffect.rotation.x = -Math.PI / 2; // Flat on the table
+    scene.add(hitEffect);
+    
+    // Animate the hit effect
+    const expandEffect = () => {
+      hitEffect.scale.x += 0.1;
+      hitEffect.scale.y += 0.1;
+      hitEffect.material.opacity -= 0.05;
+      
+      if (hitEffect.material.opacity > 0) {
+        requestAnimationFrame(expandEffect);
+      } else {
+        scene.remove(hitEffect);
+      }
+    };
+    requestAnimationFrame(expandEffect);
+    
+    // Remove the cup
+    scene.remove(hitCup.mesh);
+    world.removeBody(hitCup.body);
+    cups.splice(cups.indexOf(hitCup), 1);
+    
+    // Reset the ball after a short delay
     setTimeout(() => {
       resetBall();
-    }, 2000);
+      cupHitInCurrentTurn = false;  // Reset the cup hit flag for the next turn
+    }, 1500);
   }
 });
 
@@ -278,6 +313,12 @@ socket.on('roomError', (data) => {
 // Handle throw event
 socket.on('throw', (velocityDevice) => {
   console.log('Received throw:', velocityDevice);
+  
+  // Only allow a new throw if we haven't hit a cup in the current turn
+  if (cupHitInCurrentTurn) {
+    throwFeedback.textContent = 'Cup already hit! Wait for reset...';
+    return;
+  }
   
   // Use a dynamic scale factor based on the velocity magnitude
   const velocityMagnitude = Math.sqrt(
