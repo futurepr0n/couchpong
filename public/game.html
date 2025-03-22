@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Ping Pong Throw Game</title>
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden; 
+      font-family: Arial, sans-serif;
+    }
+    
+    #gameInfo {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background-color: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 15px;
+      border-radius: 5px;
+      z-index: 100;
+      max-width: 250px;
+    }
+    
+    #qrCodeContainer {
+      margin-top: 15px;
+      background-color: white;
+      padding: 10px;
+      border-radius: 5px;
+      text-align: center;
+    }
+    
+    #controllerLink {
+      word-break: break-all;
+      margin-top: 10px;
+      font-size: 12px;
+      color: #cccccc;
+    }
+    
+    #roomId {
+      font-weight: bold;
+      user-select: all;
+    }
+    
+    .hidden {
+      display: none;
+    }
+    
+    #connectionStatus {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 8px 12px;
+      border-radius: 5px;
+      font-weight: bold;
+      z-index: 100;
+    }
+    
+    .connected {
+      background-color: rgba(0, 128, 0, 0.7);
+      color: white;
+    }
+    
+    .disconnected {
+      background-color: rgba(255, 0, 0, 0.7);
+      color: white;
+    }
+    
+    #closeInfo {
+      cursor: pointer;
+      float: right;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div id="gameInfo">
+    <span id="closeInfo">×</span>
+    <h2>Game Room</h2>
+    <div>Room ID: <span id="roomId">Loading...</span></div>
+    <div id="qrCodeContainer"></div>
+    <div id="controllerLink"></div>
+    <div>Scan QR code or share Room ID to connect controllers.</div>
+  </div>
+  
+  <div id="connectionStatus" class="disconnected">Not Connected</div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.1/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

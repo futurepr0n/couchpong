@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ping Pong Throw Game</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 {
+      color: #333;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .button {
+      display: inline-block;
+      background-color: #4CAF50;
+      color: white;
+      padding: 15px 30px;
+      margin: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 18px;
+      text-decoration: none;
+    }
+    .button:hover {
+      background-color: #45a049;
+    }
+    .join-form {
+      margin-top: 30px;
+      padding: 15px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      background-color: #f9f9f9;
+    }
+    input {
+      padding: 10px;
+      font-size: 16px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      margin-right: 10px;
+    }
+    .room-list {
+      margin-top: 20px;
+      text-align: left;
+    }
+    .room-item {
+      padding: 10px;
+      border: 1px solid #eee;
+      margin: 5px 0;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .room-item:hover {
+      background-color: #f0f0f0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Welcome to Ping Pong Throw Game</h1>
+    <p>Create a new game room or join an existing one.</p>
+    
+    <a href="/create-room" class="button">Create New Game</a>
+    
+    <div class="join-form">
+      <h2>Join Existing Game</h2>
+      <input type="text" id="roomIdInput" placeholder="Enter Room ID">
+      <button id="joinButton" class="button">Join Game</button>
+      
+      <div class="room-list" id="roomList">
+        <h3>Active Game Rooms</h3>
+        <div id="activeRooms">Loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Join a room by ID
+    document.getElementById('joinButton').addEventListener('click', function() {
+      const roomId = document.getElementById('roomIdInput').value.trim();
+      if (roomId) {
+        window.location.href = `/game.html?room=${roomId}`;
+      } else {
+        alert('Please enter a valid Room ID');
+      }
+    });
+    
+    // Fetch active rooms
+    async function fetchRooms() {
+      try {
+        const response = await fetch('/rooms');
+        const data = await response.json();
+        
+        const roomsContainer = document.getElementById('activeRooms');
+        
+        if (data.rooms.length === 0) {
+          roomsContainer.innerHTML = '<p>No active rooms available. Create a new game!</p>';
+          return;
+        }
+        
+        let roomsHtml = '';
+        data.rooms.forEach(roomId => {
+          roomsHtml += `<div class="room-item" onclick="joinRoom('${roomId}')">${roomId}</div>`;
+        });
+        
+        roomsContainer.innerHTML = roomsHtml;
+      } catch (error) {
+        console.error('Error fetching rooms:', error);
+        document.getElementById('activeRooms').innerHTML = '<p>Error loading rooms. Please try again.</p>';
+      }
+    }
+    
+    function joinRoom(roomId) {
+      window.location.href = `/game.html?room=${roomId}`;
+    }
+    
+    // Fetch rooms on page load
+    fetchRooms();
+    
+    // Refresh room list periodically
+    setInterval(fetchRooms, 30000); // Every 30 seconds
+  </script>
+</body>
+</html>
