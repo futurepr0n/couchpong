@@ -94,23 +94,23 @@ const cupThickness = 0.02; // Wall thickness for hollow cups
 const cupSpacing = 0.45; // Spacing between cup centers
 const cups = [];
 const cupPositions = [
-  // Row 1 (closest to player, tip of triangle)
-  [0, 0, -2],
+  // Row 1 (farthest from player, base of triangle)
+  [-cupSpacing*3, 0, 2 + cupSpacing*3],
+  [-cupSpacing, 0, 2 + cupSpacing*3],
+  [cupSpacing, 0, 2 + cupSpacing*3],
+  [cupSpacing*3, 0, 2 + cupSpacing*3],
+  
+  // Row 3 
+  [-cupSpacing*2, 0, 2 + cupSpacing*2],
+  [0, 0, 2 + cupSpacing*2],
+  [cupSpacing*2, 0, 2 + cupSpacing*2],
   
   // Row 2
-  [-cupSpacing, 0, -2 - cupSpacing],
-  [cupSpacing, 0, -2 - cupSpacing],
+  [-cupSpacing, 0, 2 + cupSpacing],
+  [cupSpacing, 0, 2 + cupSpacing],
   
-  // Row 3
-  [-cupSpacing*2, 0, -2 - cupSpacing*2],
-  [0, 0, -2 - cupSpacing*2],
-  [cupSpacing*2, 0, -2 - cupSpacing*2],
-  
-  // Row 4 (optional for more cups)
-  [-cupSpacing*3, 0, -2 - cupSpacing*3],
-  [-cupSpacing, 0, -2 - cupSpacing*3],
-  [cupSpacing, 0, -2 - cupSpacing*3],
-  [cupSpacing*3, 0, -2 - cupSpacing*3]
+  // Row 1 (closest to player, tip of triangle)
+  [0, 0, 2]
 ];
 
 
@@ -521,7 +521,7 @@ function animate() {
 
   // Check if ball is inside a cup
   checkBallInCup();
-  
+
   renderer.render(scene, camera);
 }
 
