@@ -16,10 +16,10 @@ const renderer = new THREE.WebGLRenderer();
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-// Physics setup - Ensure strong gravity
+// Physics setup - Ensure strong gravity with weighted feel
 const world = new CANNON.World();
-world.gravity.set(0, -15, 0); // Increased gravity for more realistic physics
-world.defaultContactMaterial.friction = 0.5;
+world.gravity.set(0, -12, 0); // Slightly reduced gravity for more weighted feel
+world.defaultContactMaterial.friction = 0.6; // Increased friction
 world.solver.iterations = 10; // More iterations for stable physics
 
 // Table
@@ -124,9 +124,9 @@ const ballMesh = new THREE.Mesh(ballGeometry, ballMaterial);
 scene.add(ballMesh);
 
 const ballBody = new CANNON.Body({ 
-  mass: 0.05, // Lighter ball for better physics
-  linearDamping: 0.3, // Add damping to slow ball over time
-  angularDamping: 0.3 // Slow rotation
+  mass: 0.08, // Slightly heavier ball for more weighted feel
+  linearDamping: 0.4, // Increased damping to slow ball more quickly
+  angularDamping: 0.5 // Increased rotational damping
 });
 ballBody.addShape(new CANNON.Sphere(ballRadius));
 ballBody.position.set(0, 1, -3); // Starting position
@@ -134,13 +134,13 @@ world.addBody(ballBody);
 ballBody.material = new CANNON.Material();
 ballBody.material.restitution = 0.7; // More bounce
 
-// Contact material for realistic bouncing
+// Contact material for realistic bouncing with weighted feel
 const tableContactMaterial = new CANNON.ContactMaterial(
   ballBody.material, 
   tableBody.material, 
   { 
-    restitution: 0.7, // Higher restitution for more bounce
-    friction: 0.3     // Lower friction so ball rolls further
+    restitution: 0.6, // Slightly lower restitution for less bounce
+    friction: 0.4     // Higher friction for more controlled rolling
   }
 );
 world.addContactMaterial(tableContactMaterial);
@@ -286,12 +286,12 @@ socket.on('throw', (velocityDevice) => {
     velocityDevice.z * velocityDevice.z
   );
   
-  // Adjust scale factor based on magnitude - lower for strong throws
-  let scaleFactor = 1.2;
+  // Reduced power by ~50% to make throws more weighted and controlled
+  let scaleFactor = 0.6;  // Reduced from 1.2
   if (velocityMagnitude > 20) {
-    scaleFactor = 0.9; // Less amplification for stronger throws
+    scaleFactor = 0.45;  // Reduced from 0.9
   } else if (velocityMagnitude < 10) {
-    scaleFactor = 1.5; // More amplification for weaker throws
+    scaleFactor = 0.75;  // Reduced from 1.5
   }
   
   // Apply the velocity with the dynamic scale factor
