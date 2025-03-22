@@ -90,30 +90,90 @@ createBoundary(
 // Cups
 const cupRadius = 0.2;
 const cupHeight = 0.5;
+const cupThickness = 0.02; // Wall thickness for hollow cups
+const cupSpacing = 0.45; // Spacing between cup centers
 const cups = [];
 const cupPositions = [
-  [0, 0, 2],           // Center cup
-  [0.3, 0, 1.8],       // Right cup
-  [-0.3, 0, 1.8],      // Left cup
-  [0.6, 0, 1.6],       // Far right cup 
-  [-0.6, 0, 1.6],      // Far left cup
-  [0.15, 0, 1.6],      // Right-center cup
-  [-0.15, 0, 1.6]      // Left-center cup
+  // Row 1 (closest to player, tip of triangle)
+  [0, 0, -2],
+  
+  // Row 2
+  [-cupSpacing, 0, -2 - cupSpacing],
+  [cupSpacing, 0, -2 - cupSpacing],
+  
+  // Row 3
+  [-cupSpacing*2, 0, -2 - cupSpacing*2],
+  [0, 0, -2 - cupSpacing*2],
+  [cupSpacing*2, 0, -2 - cupSpacing*2],
+  
+  // Row 4 (optional for more cups)
+  [-cupSpacing*3, 0, -2 - cupSpacing*3],
+  [-cupSpacing, 0, -2 - cupSpacing*3],
+  [cupSpacing, 0, -2 - cupSpacing*3],
+  [cupSpacing*3, 0, -2 - cupSpacing*3]
 ];
 
+
 cupPositions.forEach((pos) => {
-  const cupGeometry = new THREE.CylinderGeometry(cupRadius, cupRadius, cupHeight, 32);
+  // Create a visual representation of the cup (cylinder with hole)
+  const cupOuterGeometry = new THREE.CylinderGeometry(cupRadius, cupRadius * 0.85, cupHeight, 32);
+  const cupInnerGeometry = new THREE.CylinderGeometry(cupRadius - cupThickness, (cupRadius - cupThickness) * 0.85, cupHeight, 32);
+  
+  // Offset the inner cylinder slightly so it doesn't create z-fighting
+  cupInnerGeometry.translate(0, 0.01, 0);
+  
+  // Use Three.js CSG to create a hollow cup (if available)
+  // If CSG is not available, we'll use a visual trick
   const cupMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-  const cupMesh = new THREE.Mesh(cupGeometry, cupMaterial);
+  const cupMesh = new THREE.Mesh(cupOuterGeometry, cupMaterial);
+  
+  // Make the top face of the cup invisible to simulate a hollow cup
   cupMesh.position.set(pos[0], cupHeight / 2, pos[2]);
   scene.add(cupMesh);
-
+  
+  // Create an invisible cylinder for the inside of the cup to detect when ball goes in
+  const innerMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0xff0000, 
+    transparent: true, 
+    opacity: 0.0,
+    side: THREE.BackSide // Render inside faces
+  });
+  const innerMesh = new THREE.Mesh(cupInnerGeometry, innerMaterial);
+  innerMesh.position.set(pos[0], cupHeight / 2, pos[2]);
+  scene.add(innerMesh);
+  
+  // Cup physics - use cylinder with hole for proper physics
+  // Create outer wall cylinder shape
   const cupBody = new CANNON.Body({ mass: 0 });
-  cupBody.addShape(new CANNON.Cylinder(cupRadius, cupRadius, cupHeight, 16));
+  
+  // Create a cylinder body with small thickness for the cup wall
+  const outerShape = new CANNON.Cylinder(cupRadius, cupRadius * 0.85, cupHeight, 16);
+  const innerShape = new CANNON.Cylinder(cupRadius - cupThickness, (cupRadius - cupThickness) * 0.85, cupHeight - cupThickness, 16);
+  
+  // Position and add the cup body
   cupBody.position.set(pos[0], cupHeight / 2, pos[2]);
+  cupBody.addShape(outerShape);
   world.addBody(cupBody);
-
-  cups.push({ mesh: cupMesh, body: cupBody, position: pos });
+  
+  // Create a trigger body for detecting when the ball goes inside the cup
+  const triggerBody = new CANNON.Body({ 
+    mass: 0,
+    collisionResponse: false, // This makes it a trigger (no physical interaction, just detection)
+    isTrigger: true
+  });
+  triggerBody.addShape(innerShape);
+  triggerBody.position.set(pos[0], cupHeight / 2, pos[2]);
+  world.addBody(triggerBody);
+  
+  // Add to our cups array
+  cups.push({
+    mesh: cupMesh,
+    innerMesh: innerMesh,
+    body: cupBody,
+    triggerBody: triggerBody,
+    position: pos,
+    isHit: false
+  });
 });
 
 // Ball
@@ -206,7 +266,84 @@ function resetBall() {
 // Collision detection
 let cupHitInCurrentTurn = false;
 let lastHitTime = 0;
-ballBody.addEventListener('collide', (event) => {
+
+function checkBallInCup() {
+  if (cupHitInCurrentTurn) return; // Only check if we haven't hit a cup already
+
+  const ballPos = ballBody.position;
+  
+  for (let i = 0; i < cups.length; i++) {
+    const cup = cups[i];
+    if (cup.isHit) continue; // Skip already hit cups
+    
+    const cupPos = cup.position;
+    
+    // Check if the ball's center is within the cup's inner radius and below the cup's rim
+    const dx = ballPos.x - cupPos[0];
+    const dz = ballPos.z - cupPos[2];
+    const horizontalDist = Math.sqrt(dx * dx + dz * dz);
+    
+    // Check if ball is inside cup radius and below the cup top but above the cup bottom
+    if (horizontalDist < (cupRadius - cupThickness) * 0.85 && 
+        ballPos.y < cupHeight && 
+        ballPos.y > 0.05) {
+        
+      // Ball is in the cup!
+      cupHitInCurrentTurn = true;
+      cup.isHit = true;
+      
+      // Visual feedback
+      throwFeedback.textContent = 'Cup hit! 🎉';
+      
+      // Create a hit effect (expanding circle)
+      const hitEffect = new THREE.Mesh(
+        new THREE.RingGeometry(0.1, 0.12, 32),
+        new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0.8 })
+      );
+      hitEffect.position.set(cupPos[0], 0.01, cupPos[2]);
+      hitEffect.rotation.x = -Math.PI / 2; // Flat on the table
+      scene.add(hitEffect);
+      
+      // Animate the hit effect
+      const expandEffect = () => {
+        hitEffect.scale.x += 0.1;
+        hitEffect.scale.y += 0.1;
+        hitEffect.material.opacity -= 0.05;
+        
+        if (hitEffect.material.opacity > 0) {
+          requestAnimationFrame(expandEffect);
+        } else {
+          scene.remove(hitEffect);
+        }
+      };
+      requestAnimationFrame(expandEffect);
+      
+      // Stop the ball's movement
+      ballBody.velocity.set(0, 0, 0);
+      ballBody.angularVelocity.set(0, 0, 0);
+      
+      // Remove the cup after a short delay
+      setTimeout(() => {
+        scene.remove(cup.mesh);
+        scene.remove(cup.innerMesh);
+        world.removeBody(cup.body);
+        world.removeBody(cup.triggerBody);
+        
+        // Reset the ball after a short delay
+        setTimeout(() => {
+          resetBall();
+          cupHitInCurrentTurn = false;
+        }, 1000);
+      }, 500);
+      
+      return; // Exit the loop since we've found a hit
+    }
+  }
+}
+
+
+
+/* ballBody.addEventListener('collide', (event) => {
   const otherBody = event.body;
   
   // Prevent multiple detections within short time and only allow one cup hit per turn
@@ -259,7 +396,7 @@ ballBody.addEventListener('collide', (event) => {
       cupHitInCurrentTurn = false;  // Reset the cup hit flag for the next turn
     }, 1500);
   }
-});
+}); */
 
 // Socket.io event handlers
 socket.on('connect', () => {
@@ -382,6 +519,9 @@ function animate() {
   // Check if ball needs reset
   checkBallReset();
 
+  // Check if ball is inside a cup
+  checkBallInCup();
+  
   renderer.render(scene, camera);
 }
 
