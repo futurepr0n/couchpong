@@ -14,6 +14,9 @@ const submitRoomButton = document.getElementById('submitRoomButton');
 // Set up Socket.io connection
 const socket = io();
 
+// Motion sensors flag
+let motionPermissionGranted = false;
+
 // If no room ID is provided, show manual entry
 if (!roomId) {
   manualRoomEntry.style.display = 'block';
@@ -24,6 +27,55 @@ if (!roomId) {
   roomIdDisplay.textContent = roomId;
 }
 
+// Request iOS motion permission
+function requestMotionPermission() {
+  // Check if DeviceOrientationEvent or DeviceMotionEvent is available
+  if (typeof DeviceOrientationEvent !== 'undefined' && 
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    
+    // iOS 13+ devices need to request permission
+    DeviceOrientationEvent.requestPermission()
+      .then(permissionState => {
+        if (permissionState === 'granted') {
+          motionPermissionGranted = true;
+          enableThrowButton();
+          statusDisplay.textContent = 'Motion access granted! Hold to throw.';
+        } else {
+          statusDisplay.textContent = 'Motion permission denied. Please allow motion sensors and refresh.';
+        }
+      })
+      .catch(console.error);
+  } else if (typeof DeviceMotionEvent !== 'undefined' && 
+            typeof DeviceMotionEvent.requestPermission === 'function') {
+    
+    // Alternative try with DeviceMotionEvent
+    DeviceMotionEvent.requestPermission()
+      .then(permissionState => {
+        if (permissionState === 'granted') {
+          motionPermissionGranted = true;
+          enableThrowButton();
+          statusDisplay.textContent = 'Motion access granted! Hold to throw.';
+        } else {
+          statusDisplay.textContent = 'Motion permission denied. Please allow motion sensors and refresh.';
+        }
+      })
+      .catch(console.error);
+  } else {
+    // Other devices don't need permission
+    motionPermissionGranted = true;
+    enableThrowButton();
+  }
+}
+
+// Called when we're connected to a room and ready to throw
+function enableThrowButton() {
+  // Only enable if we're connected to a room and have motion permissions (if needed)
+  if (socket.connected && roomId) {
+    throwButton.disabled = false;
+    throwButton.textContent = 'Hold to Throw';
+  }
+}
+
 // Motion tracking variables
 let initialOrientation = { beta: 0, gamma: 0 };
 let currentOrientation = { beta: 0, gamma: 0 };
@@ -31,6 +83,26 @@ let isThrowing = false;
 let throwStartTime = 0;
 let orientationHistory = [];
 let lastOrientationTime = 0;
+
+// Add a permission button for iOS
+const permissionButton = document.createElement('button');
+permissionButton.id = 'permissionButton';
+permissionButton.textContent = 'Enable Motion Controls';
+permissionButton.style.padding = '15px';
+permissionButton.style.margin = '15px';
+permissionButton.style.backgroundColor = '#2196F3';
+permissionButton.style.color = 'white';
+permissionButton.style.border = 'none';
+permissionButton.style.borderRadius = '5px';
+permissionButton.style.fontSize = '16px';
+permissionButton.addEventListener('click', requestMotionPermission);
+
+// Insert the permission button before the throw button
+throwButton.parentNode.insertBefore(permissionButton, throwButton);
+
+// Initially hide the throw button and show a message to enable motion controls
+throwButton.style.display = 'none';
+statusDisplay.textContent = 'Please tap "Enable Motion Controls" to play';
 
 // Track phone orientation
 window.addEventListener('deviceorientation', (event) => {
@@ -49,6 +121,15 @@ window.addEventListener('deviceorientation', (event) => {
       });
       lastOrientationTime = timestamp;
     }
+  }
+  
+  // If we're getting orientation events, we can hide the permission button
+  if (motionPermissionGranted === false && 
+      (event.beta !== null || event.gamma !== null)) {
+    motionPermissionGranted = true;
+    permissionButton.style.display = 'none';
+    throwButton.style.display = 'block';
+    enableThrowButton();
   }
 });
 
@@ -195,10 +276,19 @@ socket.on('disconnect', () => {
 socket.on('roomJoined', (data) => {
   roomId = data.roomId;
   roomIdDisplay.textContent = roomId;
-  throwButton.disabled = false;
+  enableThrowButton();
   connectionStatus.textContent = 'Connected to game room';
   connectionStatus.className = 'connected';
-  statusDisplay.textContent = 'Hold to throw';
+  
+  if (motionPermissionGranted) {
+    statusDisplay.textContent = 'Hold to throw';
+    throwButton.style.display = 'block';
+  } else {
+    statusDisplay.textContent = 'Please enable motion controls to throw';
+    // We'll show the permission button, but throw button stays hidden
+    permissionButton.style.display = 'block';
+    throwButton.style.display = 'none';
+  }
   
   // Hide manual entry if it was shown
   manualRoomEntry.style.display = 'none';
